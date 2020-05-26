@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Tue May 26 10:36:07 2020
+
+@author: gabin
+"""
+
+import numpy as np
+import scipy
+from scipy import interpolate
+from scipy import optimize, io, linalg
+import os
+import xarray as xr
+from matplotlib import pyplot as plt
+from scipy.interpolate import griddata
+
+#%%
+#### SWOT DATA
+# Make sure to put this script in the directory below (/data/OSMOSIS/) before you run it
+domain_name = 'OSMOSIS1'
+
+# Name of the SWOT pass in data/*domain*/ directory
+if domain_name == 'OSMOSIS1' :
+    path_SWOTpass = 'data/OSMOSIS/BOOST-SWOT_SWOT_OSMOSIS_c02_p436.nc'
+    path_nadir = 'data/OSMOSIS/BOOST-SWOT_J1_nadir_c05_p01.nc'
+    # Plotting params
+    max_range = 0.2 # Limit for colorbar (SSH in meters) for SSH
+    max_range_diff = 0.1 # Limit for colorbar (SSH in meters) for SSH differences
+    
+#%%
+#### Download a SWOT path
+
+roll_error_only = True
+
+all_but_karin = False
+
+with xr.open_dataset(path_SWOTpass, mask_and_scale=True) as (ds_SWOTpass):
+    ntime = ds_SWOTpass.time.size
+#ds_SWOTpass.info() 
+# Dimension of the dataset
+nc = ds_SWOTpass.nC.size
+lon_swotpass = np.zeros([ntime, nc])
+lon_swotpass [:,:] = ds_SWOTpass.lon
+lon_swotpass = np.ma.masked_invalid(lon_swotpass)
+lat_swotpass = np.zeros([ntime,nc])
+lat_swotpass [:,:] = ds_SWOTpass.lat
+lat_swotpass = np.ma.masked_invalid(lat_swotpass)
+ssh_swotpass = np.zeros([ntime,nc])
+if roll_error_only:
+    ssh_swotpass[:, :] = ds_SWOTpass.ssh_model + ds_SWOTpass.roll_err
+elif all_but_karin:
+   ssh_swotpass[:, :] = ds_SWOTpass.ssh_model + ds_SWOTpass.roll_err + ds_SWOTpass.phase_err + ds_SWOTpass.timing_err + ds_SWOTpass.bd_err
+else: 
+    ssh_swotpass[:, :] = ds_SWOTpass.ssh_obs
+ssh_swotpass = np.ma.masked_invalid(ssh_swotpass)
+ssh_swotpass_truth = np.zeros([ntime, nc]) 
+ssh_swotpass_truth[:, :] = ds_SWOTpass.ssh_model # ssh model
+ssh_swotpass_truth = np.ma.masked_invalid(ssh_swotpass_truth)
+
+#%%
+#### Download NADIR DATA
+with xr.open_dataset(path_nadir, mask_and_scale=True) as ds_nadirpass:
+    ds_nadirpass.info()
+ndtime = ds_nadirpass.time.size
+lon_nadirpass = np.zeros([ndtime])
+lon_nadirpass[:] = ds_nadirpass.lon
+lat_nadirpass = np.zeros([ndtime])
+lat_nadirpass[:] = ds_nadirpass.lat
+x_al = np.zeros([ndtime])
+x_al[:] = ds_nadirpass.x_al
+ssh_nadir = np.zeros([ndtime])  
+            
+ssh_nadir[:] = ds_nadirpass.ssh_obs
+ssh_nadir_truth = np.zeros([ndtime])  
+ssh_nadir_truth[:] = ds_nadirpass.ssh_model
+
+#%%
+### SSH vs Nadir along track (x_al) for Nadir data
+plt.figure()
+#plt.scatter(lon_swotpass, lat_swotpass, c=ssh_swotpass, s=15)
+plt.plot(x_al,ssh_nadir)
+plt.ylabel('SSH (m)')
+plt.xlabel('x_al (km)')
+plt.title('Nadir data along track', fontsize=15)
+#cb = plt.colorbar()
+#cb.ax.tick_params(labelsize=15)
+
+#%%
+plt.figure(figsize=(8,8))
+plt.scatter(lon_swotpass, lat_swotpass,c=ssh_swotpass,s=15)
+plt.scatter(lon_nadirpass,lat_nadirpass,c=ssh_nadir,s=15) 
+plt.ylabel('Latitude (°)',fontsize=15)
+plt.xlabel('Lontitude (°)',fontsize=15)
+plt.title('SWOT and Nadir',fontsize=15)
+plt.colorbar()
+
+#%%
+### select SSH data along the track (x_al)
+xn,yn=lat_nadirpass,lon_nadirpass
+xs,ys=lat_swotpass,lon_swotpass
+ssh=ssh_swotpass
+
+print(xs.shape)
+print(ys.shape)
+
+
+#%%
+### Select data
+plt.figure
+plt.plot(lon_swotpass,lat_swotpass)
+plt.plot(lon_nadirpass,lat_nadirpass)
+
+for i in range (0,ntime):
+    for j in range (0,ndtime):
+        if lon_swotpass[i,0]-lon_nadir_pass[j]<0.1 and lat_swotpass[i,0]-lat_nadirpass[j]<0.1:
+            a=i
+            b=j
+            
+lon_swotpass_short=np.zeros[nc]
+lon_swotpass_short[:]=lon_swotpass[i,:]
+lat_swotpass_short=np.zeros[nc]
+lat_swotpass_short[:]=lat_swotpass[i,:]
+
+
+#%%
+### Interpolation
+swot2nadir_interp = interpolate.RectBivariateSpline(xs, ys, ssh)
+pn2d = swot2nadir_interp(xn,yn)
+pn2d.shape
+pn = np.diag(pn2d)
+
+plt.figure(figsize=(10,10))
+plt.scatter(xs, ys, s = 15,c=ssh)
+plt.scatter(xn, yn, s = 4, c=pn)
+
+#%%
+plt.figure(figsize=(10,10))
+plt.plot(x_al,pn)
+plt.ylabel('SSH (m)')
+plt.xlabel('x_al (km)')
+plt.title('SWOT data along track', fontsize=15)
+
+plt.figure(figsize=(16,16))
+plt.plot(x_al,pn)
+plt.plot(x_al,ssh_nadir)
+plt.ylabel('SSH (m)')
+plt.xlabel('x_al (km)')
+plt.title('SWOT and Nadir data along track', fontsize=15)
